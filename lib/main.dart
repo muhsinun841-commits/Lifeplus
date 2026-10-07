@@ -1,13 +1,10 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:intl/date_symbol_data_local.dart';
-import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeDateFormatting('id_ID', null);
   runApp(const LifePlusApp());
 }
 
@@ -15,15 +12,94 @@ Future<void> main() async {
 // COLORS
 // ============================================================
 
-const yellow = Color(0xFFFFD21F);
-const yellowSoft = Color(0xFFFFF7D1);
-const dark = Color(0xFF171717);
-const darkSoft = Color(0xFF5F6368);
-const green = Color(0xFF20B26B);
-const red = Color(0xFFE74C3C);
-const blue = Color(0xFF2589E8);
-const orange = Color(0xFFFF9800);
-const background = Color(0xFFF7F8FA);
+const Color lifeYellow = Color(0xFFFFD21F);
+const Color lifeDark = Color(0xFF111417);
+const Color lifeGreen = Color(0xFF20B26B);
+const Color lifeRed = Color(0xFFE74C3C);
+const Color lifeBlue = Color(0xFF2589E8);
+const Color lifeOrange = Color(0xFFFF9F1C);
+const Color background = Color(0xFFF6F7F9);
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+String two(int n) => n.toString().padLeft(2, '0');
+
+String formatDate(DateTime d) {
+  const months = [
+    'Januari',
+    'Februari',
+    'Maret',
+    'April',
+    'Mei',
+    'Juni',
+    'Juli',
+    'Agustus',
+    'September',
+    'Oktober',
+    'November',
+    'Desember',
+  ];
+
+  return '${d.day} ${months[d.month - 1]} ${d.year}';
+}
+
+String formatShortDate(DateTime d) {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'Mei',
+    'Jun',
+    'Jul',
+    'Agu',
+    'Sep',
+    'Okt',
+    'Nov',
+    'Des',
+  ];
+
+  return '${d.day} ${months[d.month - 1]}';
+}
+
+String formatDay(DateTime d) {
+  const days = [
+    'Senin',
+    'Selasa',
+    'Rabu',
+    'Kamis',
+    'Jumat',
+    'Sabtu',
+    'Minggu',
+  ];
+
+  return days[d.weekday - 1];
+}
+
+String greeting() {
+  final hour = DateTime.now().hour;
+
+  if (hour < 11) return 'pagi';
+  if (hour < 15) return 'siang';
+  if (hour < 18) return 'sore';
+  return 'malam';
+}
+
+int timeToMinutes(TimeOfDay t) {
+  return t.hour * 60 + t.minute;
+}
+
+bool sameDay(DateTime a, DateTime b) {
+  return a.year == b.year &&
+      a.month == b.month &&
+      a.day == b.day;
+}
+
+String timeText(TimeOfDay time) {
+  return '${two(time.hour)}:${two(time.minute)}';
+}
 
 // ============================================================
 // TASK MODEL
@@ -61,18 +137,18 @@ class Task {
     };
   }
 
-  factory Task.fromJson(Map<String, dynamic> j) {
+  factory Task.fromJson(Map<String, dynamic> json) {
     return Task(
-      id: j['id']?.toString() ?? DateTime.now().microsecondsSinceEpoch.toString(),
-      title: j['title']?.toString() ?? '',
-      date: DateTime.tryParse(j['date']?.toString() ?? '') ?? DateTime.now(),
+      id: json['id']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      date: DateTime.parse(json['date'].toString()),
       time: TimeOfDay(
-        hour: (j['hour'] ?? 0) as int,
-        minute: (j['minute'] ?? 0) as int,
+        hour: json['hour'] ?? 0,
+        minute: json['minute'] ?? 0,
       ),
-      priority: j['priority']?.toString() ?? 'Sedang',
-      note: j['note']?.toString() ?? '',
-      done: j['done'] ?? false,
+      priority: json['priority']?.toString() ?? 'Sedang',
+      note: json['note']?.toString() ?? '',
+      done: json['done'] ?? false,
     );
   }
 }
@@ -84,44 +160,39 @@ class Task {
 class Reminder {
   String id;
   String title;
-  DateTime date;
   TimeOfDay time;
-  String repeat;
   bool active;
+  bool repeatDaily;
 
   Reminder({
     required this.id,
     required this.title,
-    required this.date,
     required this.time,
-    this.repeat = 'Sekali',
     this.active = true,
+    this.repeatDaily = false,
   });
 
   Map<String, dynamic> toJson() {
     return {
       'id': id,
       'title': title,
-      'date': date.toIso8601String(),
       'hour': time.hour,
       'minute': time.minute,
-      'repeat': repeat,
       'active': active,
+      'repeatDaily': repeatDaily,
     };
   }
 
-  factory Reminder.fromJson(Map<String, dynamic> j) {
+  factory Reminder.fromJson(Map<String, dynamic> json) {
     return Reminder(
-      id: j['id']?.toString() ??
-          DateTime.now().microsecondsSinceEpoch.toString(),
-      title: j['title']?.toString() ?? '',
-      date: DateTime.tryParse(j['date']?.toString() ?? '') ?? DateTime.now(),
+      id: json['id']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
       time: TimeOfDay(
-        hour: (j['hour'] ?? 0) as int,
-        minute: (j['minute'] ?? 0) as int,
+        hour: json['hour'] ?? 0,
+        minute: json['minute'] ?? 0,
       ),
-      repeat: j['repeat']?.toString() ?? 'Sekali',
-      active: j['active'] ?? true,
+      active: json['active'] ?? true,
+      repeatDaily: json['repeatDaily'] ?? false,
     );
   }
 }
@@ -137,17 +208,23 @@ class LifePlusStore extends ChangeNotifier {
   String userName = 'Muhammad';
 
   Future<void> load() async {
-    final p = await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
 
-    userName = p.getString('userName') ?? 'Muhammad';
+    userName = prefs.getString('userName') ?? 'Muhammad';
 
-    final taskData = p.getString('tasks');
-    final reminderData = p.getString('reminders');
+    final taskData = prefs.getString('tasks');
+    final reminderData = prefs.getString('reminders');
 
     if (taskData != null && taskData.isNotEmpty) {
       try {
-        tasks = (jsonDecode(taskData) as List)
-            .map((e) => Task.fromJson(Map<String, dynamic>.from(e)))
+        final decoded = jsonDecode(taskData) as List;
+
+        tasks = decoded
+            .map(
+              (item) => Task.fromJson(
+                Map<String, dynamic>.from(item),
+              ),
+            )
             .toList();
       } catch (_) {
         tasks = [];
@@ -156,8 +233,14 @@ class LifePlusStore extends ChangeNotifier {
 
     if (reminderData != null && reminderData.isNotEmpty) {
       try {
-        reminders = (jsonDecode(reminderData) as List)
-            .map((e) => Reminder.fromJson(Map<String, dynamic>.from(e)))
+        final decoded = jsonDecode(reminderData) as List;
+
+        reminders = decoded
+            .map(
+              (item) => Reminder.fromJson(
+                Map<String, dynamic>.from(item),
+              ),
+            )
             .toList();
       } catch (_) {
         reminders = [];
@@ -168,18 +251,22 @@ class LifePlusStore extends ChangeNotifier {
   }
 
   Future<void> save() async {
-    final p = await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
 
-    await p.setString('userName', userName);
+    await prefs.setString('userName', userName);
 
-    await p.setString(
+    await prefs.setString(
       'tasks',
-      jsonEncode(tasks.map((e) => e.toJson()).toList()),
+      jsonEncode(
+        tasks.map((task) => task.toJson()).toList(),
+      ),
     );
 
-    await p.setString(
+    await prefs.setString(
       'reminders',
-      jsonEncode(reminders.map((e) => e.toJson()).toList()),
+      jsonEncode(
+        reminders.map((item) => item.toJson()).toList(),
+      ),
     );
   }
 
@@ -190,7 +277,9 @@ class LifePlusStore extends ChangeNotifier {
   }
 
   Future<void> updateTask(Task task) async {
-    final index = tasks.indexWhere((x) => x.id == task.id);
+    final index = tasks.indexWhere(
+      (item) => item.id == task.id,
+    );
 
     if (index >= 0) {
       tasks[index] = task;
@@ -201,19 +290,23 @@ class LifePlusStore extends ChangeNotifier {
   }
 
   Future<void> deleteTask(String id) async {
-    tasks.removeWhere((x) => x.id == id);
+    tasks.removeWhere((task) => task.id == id);
+
     await save();
     notifyListeners();
   }
 
   Future<void> addReminder(Reminder reminder) async {
     reminders.add(reminder);
+
     await save();
     notifyListeners();
   }
 
   Future<void> updateReminder(Reminder reminder) async {
-    final index = reminders.indexWhere((x) => x.id == reminder.id);
+    final index = reminders.indexWhere(
+      (item) => item.id == reminder.id,
+    );
 
     if (index >= 0) {
       reminders[index] = reminder;
@@ -224,13 +317,18 @@ class LifePlusStore extends ChangeNotifier {
   }
 
   Future<void> deleteReminder(String id) async {
-    reminders.removeWhere((x) => x.id == id);
+    reminders.removeWhere(
+      (reminder) => reminder.id == id,
+    );
+
     await save();
     notifyListeners();
   }
 
   Future<void> setName(String name) async {
-    userName = name.trim().isEmpty ? 'Pengguna' : name.trim();
+    final cleaned = name.trim();
+
+    userName = cleaned.isEmpty ? 'Pengguna' : cleaned;
 
     await save();
     notifyListeners();
@@ -250,29 +348,18 @@ class LifePlusApp extends StatefulWidget {
 
 class _LifePlusAppState extends State<LifePlusApp> {
   final LifePlusStore store = LifePlusStore();
-  bool loading = true;
 
   @override
   void initState() {
     super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    await store.load();
-
-    if (mounted) {
-      setState(() {
-        loading = false;
-      });
-    }
+    store.load();
   }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: store,
-      builder: (_, __) {
+      builder: (context, child) {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
           title: 'LIFE+',
@@ -280,13 +367,13 @@ class _LifePlusAppState extends State<LifePlusApp> {
             useMaterial3: true,
             scaffoldBackgroundColor: background,
             colorScheme: ColorScheme.fromSeed(
-              seedColor: yellow,
+              seedColor: lifeYellow,
               brightness: Brightness.light,
             ),
             fontFamily: 'sans',
             appBarTheme: const AppBarTheme(
               backgroundColor: background,
-              foregroundColor: dark,
+              foregroundColor: lifeDark,
               elevation: 0,
               centerTitle: false,
             ),
@@ -294,85 +381,32 @@ class _LifePlusAppState extends State<LifePlusApp> {
               elevation: 0,
               color: Colors.white,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(18),
               ),
             ),
             inputDecorationTheme: InputDecorationTheme(
               filled: true,
               fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 18,
-                vertical: 16,
-              ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(16),
                 borderSide: BorderSide.none,
               ),
-            ),
-          ),
-          home: loading
-              ? const SplashPage()
-              : MainShell(store: store),
-        );
-      },
-    );
-  }
-}
-
-// ============================================================
-// SPLASH
-// ============================================================
-
-class SplashPage extends StatelessWidget {
-  const SplashPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: yellow,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 100,
-              height: 100,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(30),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none,
               ),
-              child: const Center(
-                child: Text(
-                  '+',
-                  style: TextStyle(
-                    fontSize: 64,
-                    fontWeight: FontWeight.w900,
-                    color: dark,
-                  ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(
+                  color: lifeYellow,
+                  width: 2,
                 ),
               ),
             ),
-            const SizedBox(height: 22),
-            const Text(
-              'LIFE+',
-              style: TextStyle(
-                fontSize: 38,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 2,
-                color: dark,
-              ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Atur Hari, Raih Hidup yang Lebih Baik',
-              style: TextStyle(
-                fontSize: 13,
-                color: dark,
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
+          home: MainShell(store: store),
+        );
+      },
     );
   }
 }
@@ -420,18 +454,20 @@ class _MainShellState extends State<MainShell> {
 
     return Scaffold(
       body: SafeArea(
-        child: pages[index],
+        child: IndexedStack(
+          index: index,
+          children: pages,
+        ),
       ),
       bottomNavigationBar: NavigationBar(
-        height: 76,
         selectedIndex: index,
         onDestinationSelected: (value) {
           setState(() {
             index = value;
           });
         },
-        indicatorColor: yellow,
-        backgroundColor: const Color(0xFFFFF9EC),
+        indicatorColor: lifeYellow,
+        backgroundColor: Colors.white,
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.home_outlined),
@@ -476,7 +512,7 @@ class _MainShellState extends State<MainShell> {
 }
 
 // ============================================================
-// HOME
+// HOME PAGE
 // ============================================================
 
 class HomePage extends StatelessWidget {
@@ -493,226 +529,84 @@ class HomePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final now = DateTime.now();
 
-    final today = store.tasks.where((task) {
-      return _sameDay(task.date, now);
-    }).toList();
+    final today = store.tasks
+        .where((task) => sameDay(task.date, now))
+        .toList();
 
-    today.sort((a, b) {
-      return _minutes(a.time).compareTo(_minutes(b.time));
-    });
+    today.sort(
+      (a, b) => timeToMinutes(a.time)
+          .compareTo(timeToMinutes(b.time)),
+    );
 
-    final totalToday = today.length;
-    final doneToday = today.where((t) => t.done).length;
+    final total = store.tasks.length;
+    final done = store.tasks.where((task) => task.done).length;
 
-    final progress = totalToday == 0
-        ? 0.0
-        : doneToday / totalToday;
+    final progress =
+        total == 0 ? 0.0 : done / total;
 
     final activeReminders =
-        store.reminders.where((r) => r.active).length;
+        store.reminders.where((item) => item.active).length;
 
     return RefreshIndicator(
       onRefresh: () async {
         await store.load();
       },
       child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+        padding: const EdgeInsets.fromLTRB(
+          20,
+          20,
+          20,
+          30,
+        ),
         children: [
-          // HEADER
+          _header(context),
+          const SizedBox(height: 22),
+
+          _todayCard(now),
+
+          const SizedBox(height: 14),
+
           Row(
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Selamat ${_greeting()}',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: darkSoft,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '${store.userName} 👋',
-                      style: const TextStyle(
-                        fontSize: 25,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Mari buat hari ini lebih produktif.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: darkSoft,
-                      ),
-                    ),
-                  ],
+                child: _summaryCard(
+                  icon: Icons.task_alt,
+                  value: '$total',
+                  label: 'Total Tugas',
+                  color: lifeGreen,
                 ),
               ),
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: IconButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => SettingsPage(store: store),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.settings_outlined),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _summaryCard(
+                  icon: Icons.check_circle_outline,
+                  value: '$done',
+                  label: 'Selesai',
+                  color: lifeBlue,
                 ),
               ),
             ],
           ),
 
-          const SizedBox(height: 20),
+          const SizedBox(height: 10),
 
-          // DATE CARD
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [
-                  yellow,
-                  Color(0xFFFFDF45),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(.9),
-                    borderRadius: BorderRadius.circular(17),
-                  ),
-                  child: const Icon(
-                    Icons.calendar_month,
-                    color: dark,
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Hari ini',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        DateFormat(
-                          'EEEE, d MMMM yyyy',
-                          'id_ID',
-                        ).format(now),
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 14),
-
-          // PRODUCTIVITY CARD
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(.04),
-                  blurRadius: 15,
-                  offset: const Offset(0, 5),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Produktivitas Hari Ini',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      '${(progress * 100).round()}%',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
-                        color: green,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '$doneToday dari $totalToday tugas selesai',
-                  style: const TextStyle(
-                    color: darkSoft,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
-                  child: LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 10,
-                    backgroundColor: Colors.black12,
-                    color: green,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 14),
-
-          // MINI STATS
           Row(
             children: [
               Expanded(
-                child: _miniStat(
-                  icon: Icons.task_alt,
-                  value: '$totalToday',
-                  label: 'Tugas hari ini',
-                  color: green,
+                child: _summaryCard(
+                  icon: Icons.notifications_none,
+                  value: '$activeReminders',
+                  label: 'Pengingat',
+                  color: lifeOrange,
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _miniStat(
-                  icon: Icons.notifications_none,
-                  value: '$activeReminders',
-                  label: 'Pengingat aktif',
-                  color: blue,
+                child: _summaryCard(
+                  icon: Icons.percent,
+                  value: '${(progress * 100).round()}%',
+                  label: 'Produktivitas',
+                  color: lifeRed,
                 ),
               ),
             ],
@@ -720,16 +614,15 @@ class HomePage extends StatelessWidget {
 
           const SizedBox(height: 24),
 
-          // TASK HEADER
           Row(
+            mainAxisAlignment:
+                MainAxisAlignment.spaceBetween,
             children: [
-              const Expanded(
-                child: Text(
-                  'Tugas Hari Ini',
-                  style: TextStyle(
-                    fontSize: 19,
-                    fontWeight: FontWeight.w900,
-                  ),
+              const Text(
+                'Tugas Hari Ini',
+                style: TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
               TextButton(
@@ -749,39 +642,40 @@ class HomePage extends StatelessWidget {
             ],
           ),
 
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
 
           if (today.isEmpty)
-            _homeEmpty(onAdd)
+            _emptyHome(onAdd)
           else
-            ...today.take(5).map(
-                  (task) => _homeTaskCard(
+            ...today
+                .take(5)
+                .map(
+                  (task) => _taskTile(
                     context,
                     task,
                     store,
                   ),
                 ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
 
-          // ADD TASK
           SizedBox(
             height: 56,
             child: FilledButton.icon(
               onPressed: onAdd,
               style: FilledButton.styleFrom(
-                backgroundColor: yellow,
-                foregroundColor: dark,
+                backgroundColor: lifeYellow,
+                foregroundColor: lifeDark,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(17),
                 ),
               ),
               icon: const Icon(Icons.add),
               label: const Text(
                 'Tambah Tugas',
                 style: TextStyle(
+                  fontWeight: FontWeight.w800,
                   fontSize: 16,
-                  fontWeight: FontWeight.w900,
                 ),
               ),
             ),
@@ -791,43 +685,110 @@ class HomePage extends StatelessWidget {
     );
   }
 
-  Widget _miniStat({
-    required IconData icon,
-    required String value,
-    required String label,
-    required Color color,
-  }) {
+  Widget _header(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            color: lifeYellow,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: const Center(
+            child: Text(
+              'L+',
+              style: TextStyle(
+                color: lifeDark,
+                fontWeight: FontWeight.w900,
+                fontSize: 20,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 13),
+        Expanded(
+          child: Column(
+            crossAxisAlignment:
+                CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Selamat ${greeting()},',
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Colors.black54,
+                ),
+              ),
+              Text(
+                '${store.userName} 👋',
+                style: const TextStyle(
+                  fontSize: 23,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+        ),
+        IconButton(
+          style: IconButton.styleFrom(
+            backgroundColor: Colors.white,
+          ),
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => SettingsPage(
+                  store: store,
+                ),
+              ),
+            );
+          },
+          icon: const Icon(Icons.settings_outlined),
+        ),
+      ],
+    );
+  }
+
+  Widget _todayCard(DateTime now) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        color: lifeYellow,
+        borderRadius: BorderRadius.circular(22),
       ),
       child: Row(
         children: [
-          Icon(
-            icon,
-            color: color,
-            size: 27,
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(
+              Icons.calendar_month,
+              color: lifeDark,
+            ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment:
+                  CrossAxisAlignment.start,
               children: [
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 20,
+                const Text(
+                  'Hari ini',
+                  style: TextStyle(
+                    fontSize: 17,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
+                const SizedBox(height: 3),
                 Text(
-                  label,
-                  maxLines: 2,
+                  '${formatDay(now)}, ${formatDate(now)}',
                   style: const TextStyle(
-                    fontSize: 11,
-                    color: darkSoft,
+                    fontSize: 13,
+                    color: Colors.black54,
                   ),
                 ),
               ],
@@ -838,130 +799,103 @@ class HomePage extends StatelessWidget {
     );
   }
 
-  Widget _homeEmpty(VoidCallback onAdd) {
-    return Container(
-      padding: const EdgeInsets.all(25),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: Column(
-        children: [
-          Container(
-            width: 65,
-            height: 65,
-            decoration: BoxDecoration(
-              color: green.withOpacity(.10),
-              shape: BoxShape.circle,
+  Widget _summaryCard({
+    required IconData icon,
+    required String value,
+    required String label,
+    required Color color,
+  }) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              width: 43,
+              height: 43,
+              decoration: BoxDecoration(
+                color: color.withOpacity(.12),
+                borderRadius: BorderRadius.circular(13),
+              ),
+              child: Icon(
+                icon,
+                color: color,
+              ),
             ),
-            child: const Icon(
-              Icons.check_circle_outline,
-              size: 38,
-              color: green,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.black54,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Belum ada tugas hari ini',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 5),
-          const Text(
-            'Tambahkan tugas agar aktivitas hari ini lebih teratur.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 12,
-              color: darkSoft,
-            ),
-          ),
-          const SizedBox(height: 14),
-          OutlinedButton.icon(
-            onPressed: onAdd,
-            icon: const Icon(Icons.add),
-            label: const Text('Tambah sekarang'),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _homeTaskCard(
-    BuildContext context,
-    Task task,
-    LifePlusStore store,
-  ) {
+  Widget _emptyHome(VoidCallback add) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 9),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: () async {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => AddTaskPage(
-                store: store,
-                task: task,
+      child: Padding(
+        padding: const EdgeInsets.all(25),
+        child: Column(
+          children: [
+            Container(
+              width: 70,
+              height: 70,
+              decoration: BoxDecoration(
+                color: lifeGreen.withOpacity(.10),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.task_alt,
+                size: 36,
+                color: lifeGreen,
               ),
             ),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 9,
-          ),
-          child: Row(
-            children: [
-              Checkbox(
-                value: task.done,
-                activeColor: green,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                onChanged: (value) async {
-                  task.done = value ?? false;
-                  await store.updateTask(task);
-                },
+            const SizedBox(height: 14),
+            const Text(
+              'Belum ada tugas hari ini',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
               ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      task.title,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        decoration:
-                            task.done ? TextDecoration.lineThrough : null,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.access_time,
-                          size: 14,
-                          color: darkSoft,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          task.time.format(context),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: darkSoft,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+            ),
+            const SizedBox(height: 5),
+            const Text(
+              'Tambahkan tugas agar hari Anda lebih teratur.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.black54,
+                fontSize: 13,
               ),
-              _priority(task.priority),
-            ],
-          ),
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: add,
+              icon: const Icon(Icons.add),
+              label: const Text('Tambah sekarang'),
+            ),
+          ],
         ),
       ),
     );
@@ -1002,375 +936,139 @@ class _TasksPageState extends State<TasksPage> {
     }
 
     list.sort((a, b) {
-      final dateCompare = a.date.compareTo(b.date);
+      final date =
+          a.date.compareTo(b.date);
 
-      if (dateCompare != 0) {
-        return dateCompare;
+      if (date != 0) {
+        return date;
       }
 
-      return _minutes(a.time).compareTo(_minutes(b.time));
+      return timeToMinutes(a.time)
+          .compareTo(timeToMinutes(b.time));
     });
 
-    final total = widget.store.tasks.length;
-    final done = widget.store.tasks.where((t) => t.done).length;
+    final pending =
+        widget.store.tasks.where((t) => !t.done).length;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
-      children: [
-        Row(
-          children: [
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Tugas',
-                    style: TextStyle(
-                      fontSize: 29,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  SizedBox(height: 3),
-                  Text(
-                    'Atur semua aktivitas Anda',
-                    style: TextStyle(
-                      color: darkSoft,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 13,
-                vertical: 9,
-              ),
-              decoration: BoxDecoration(
-                color: yellowSoft,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Text(
-                '$done/$total',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 18),
-
-        SegmentedButton<int>(
-          segments: const [
-            ButtonSegment(
-              value: 0,
-              label: Text('Semua'),
-            ),
-            ButtonSegment(
-              value: 1,
-              label: Text('Belum'),
-            ),
-            ButtonSegment(
-              value: 2,
-              label: Text('Selesai'),
-            ),
-          ],
-          selected: {filter},
-          onSelectionChanged: (value) {
-            setState(() {
-              filter = value.first;
-            });
-          },
-        ),
-
-        const SizedBox(height: 18),
-
-        if (list.isEmpty)
-          _emptyTask(widget.onAdd)
-        else
-          ...list.map(
-            (task) => _taskCard(
-              context,
-              task,
-              widget.store,
-            ),
-          ),
-
-        const SizedBox(height: 14),
-
-        SizedBox(
-          height: 54,
-          child: FilledButton.icon(
-            onPressed: widget.onAdd,
-            style: FilledButton.styleFrom(
-              backgroundColor: yellow,
-              foregroundColor: dark,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
-              ),
-            ),
-            icon: const Icon(Icons.add),
-            label: const Text(
-              'Tambah Tugas',
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _taskCard(
-    BuildContext context,
-    Task task,
-    LifePlusStore store,
-  ) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: () async {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => AddTaskPage(
-                store: store,
-                task: task,
-              ),
-            ),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(13),
-          child: Row(
-            children: [
-              Checkbox(
-                value: task.done,
-                activeColor: green,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                onChanged: (value) async {
-                  task.done = value ?? false;
-                  await store.updateTask(task);
-                },
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      task.title,
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        decoration:
-                            task.done ? TextDecoration.lineThrough : null,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.calendar_today_outlined,
-                          size: 14,
-                          color: darkSoft,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          DateFormat(
-                            'd MMM yyyy',
-                            'id_ID',
-                          ).format(task.date),
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: darkSoft,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        const Icon(
-                          Icons.access_time,
-                          size: 14,
-                          color: darkSoft,
-                        ),
-                        const SizedBox(width: 3),
-                        Text(
-                          task.time.format(context),
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: darkSoft,
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (task.note.isNotEmpty) ...[
-                      const SizedBox(height: 5),
-                      Text(
-                        task.note,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: darkSoft,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(width: 5),
-              Column(
-                children: [
-                  _priority(task.priority),
-                  const SizedBox(height: 5),
-                  PopupMenuButton<String>(
-                    icon: const Icon(
-                      Icons.more_vert,
-                      color: darkSoft,
-                    ),
-                    onSelected: (value) async {
-                      if (value == 'edit') {
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => AddTaskPage(
-                              store: store,
-                              task: task,
-                            ),
-                          ),
-                        );
-                      }
-
-                      if (value == 'delete') {
-                        await _confirmDelete(
-                          context,
-                          task,
-                          store,
-                        );
-                      }
-                    },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(
-                        value: 'edit',
-                        child: Row(
-                          children: [
-                            Icon(Icons.edit_outlined),
-                            SizedBox(width: 10),
-                            Text('Edit'),
-                          ],
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.delete_outline,
-                              color: red,
-                            ),
-                            SizedBox(width: 10),
-                            Text('Hapus'),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _emptyTask(VoidCallback onAdd) {
-    return Container(
-      padding: const EdgeInsets.all(30),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        children: [
-          const Icon(
-            Icons.task_alt,
-            size: 60,
-            color: green,
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Belum ada tugas',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Tambahkan tugas pertama Anda untuk mulai menggunakan LIFE+.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: darkSoft,
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 15),
-          OutlinedButton.icon(
-            onPressed: onAdd,
-            icon: const Icon(Icons.add),
-            label: const Text('Tambah sekarang'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _confirmDelete(
-    BuildContext context,
-    Task task,
-    LifePlusStore store,
-  ) async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text(
-          'Hapus tugas?',
+    return Scaffold(
+      backgroundColor: background,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: widget.onAdd,
+        backgroundColor: lifeYellow,
+        foregroundColor: lifeDark,
+        icon: const Icon(Icons.add),
+        label: const Text(
+          'Tambah',
           style: TextStyle(
             fontWeight: FontWeight.w800,
           ),
         ),
-        content: Text(
-          'Tugas "${task.title}" akan dihapus.',
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(
+          20,
+          24,
+          20,
+          100,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: red,
+        children: [
+          const Text(
+            'Tugas',
+            style: TextStyle(
+              fontSize: 29,
+              fontWeight: FontWeight.w900,
             ),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Hapus'),
           ),
+          const SizedBox(height: 5),
+          Text(
+            '$pending tugas belum selesai',
+            style: const TextStyle(
+              color: Colors.black54,
+            ),
+          ),
+          const SizedBox(height: 18),
+
+          SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(
+                value: 0,
+                label: Text('Semua'),
+              ),
+              ButtonSegment(
+                value: 1,
+                label: Text('Belum'),
+              ),
+              ButtonSegment(
+                value: 2,
+                label: Text('Selesai'),
+              ),
+            ],
+            selected: {filter},
+            onSelectionChanged: (value) {
+              setState(() {
+                filter = value.first;
+              });
+            },
+          ),
+
+          const SizedBox(height: 18),
+
+          if (list.isEmpty)
+            _emptyTask()
+          else
+            ...list.map(
+              (task) => _taskTile(
+                context,
+                task,
+                widget.store,
+              ),
+            ),
         ],
       ),
     );
+  }
 
-    if (result == true) {
-      await store.deleteTask(task.id);
-    }
+  Widget _emptyTask() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(30),
+        child: Column(
+          children: [
+            const Icon(
+              Icons.assignment_outlined,
+              size: 60,
+              color: Colors.black26,
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Belum ada tugas',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 17,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Buat tugas pertama Anda sekarang.',
+              style: TextStyle(
+                color: Colors.black54,
+              ),
+            ),
+            const SizedBox(height: 15),
+            OutlinedButton.icon(
+              onPressed: widget.onAdd,
+              icon: const Icon(Icons.add),
+              label: const Text('Buat tugas'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
 // ============================================================
-// ADD / EDIT TASK
+// ADD / EDIT TASK PAGE
 // ============================================================
 
 class AddTaskPage extends StatefulWidget {
@@ -1384,18 +1082,19 @@ class AddTaskPage extends StatefulWidget {
   });
 
   @override
-  State<AddTaskPage> createState() => _AddTaskPageState();
+  State<AddTaskPage> createState() =>
+      _AddTaskPageState();
 }
 
 class _AddTaskPageState extends State<AddTaskPage> {
-  late TextEditingController title;
-  late TextEditingController note;
+  late TextEditingController titleController;
+  late TextEditingController noteController;
 
   late DateTime date;
   late TimeOfDay time;
   late String priority;
 
-  bool get isEdit => widget.task != null;
+  bool get editing => widget.task != null;
 
   @override
   void initState() {
@@ -1403,272 +1102,110 @@ class _AddTaskPageState extends State<AddTaskPage> {
 
     final task = widget.task;
 
-    title = TextEditingController(
+    titleController = TextEditingController(
       text: task?.title ?? '',
     );
 
-    note = TextEditingController(
+    noteController = TextEditingController(
       text: task?.note ?? '',
     );
 
     date = task?.date ?? DateTime.now();
-
     time = task?.time ?? TimeOfDay.now();
-
     priority = task?.priority ?? 'Sedang';
   }
 
   @override
   void dispose() {
-    title.dispose();
-    note.dispose();
+    titleController.dispose();
+    noteController.dispose();
     super.dispose();
   }
 
   Future<void> pickDate() async {
-    final selected = await showDatePicker(
+    final result = await showDatePicker(
       context: context,
-      firstDate: DateTime.now().subtract(
-        const Duration(days: 3650),
-      ),
-      lastDate: DateTime.now().add(
-        const Duration(days: 3650),
-      ),
       initialDate: date,
-      locale: const Locale('id', 'ID'),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
     );
 
-    if (selected != null) {
+    if (result != null) {
       setState(() {
-        date = selected;
+        date = result;
       });
     }
   }
 
   Future<void> pickTime() async {
-    final selected = await showTimePicker(
+    final result = await showTimePicker(
       context: context,
       initialTime: time,
     );
 
-    if (selected != null) {
+    if (result != null) {
       setState(() {
-        time = selected;
+        time = result;
       });
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          isEdit ? 'Edit Tugas' : 'Tambah Tugas',
-          style: const TextStyle(
-            fontWeight: FontWeight.w900,
-          ),
+  Future<void> pickPriority() async {
+    final result =
+        await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(25),
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 10, 20, 30),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: yellowSoft,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
+      builder: (context) {
+        final values = [
+          ('Rendah', lifeGreen),
+          ('Sedang', lifeOrange),
+          ('Tinggi', lifeRed),
+        ];
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 46,
-                  height: 46,
-                  decoration: BoxDecoration(
-                    color: yellow,
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  child: const Icon(
-                    Icons.task_alt,
-                    color: dark,
+                const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text(
+                    'Pilih Prioritas',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    isEdit
-                        ? 'Perbarui detail tugas Anda.'
-                        : 'Buat tugas baru agar aktivitas lebih teratur.',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                ...values.map(
+                  (item) => ListTile(
+                    leading: Icon(
+                      Icons.flag,
+                      color: item.$2,
                     ),
+                    title: Text(item.$1),
+                    trailing: priority == item.$1
+                        ? const Icon(
+                            Icons.check,
+                            color: lifeGreen,
+                          )
+                        : null,
+                    onTap: () {
+                      Navigator.pop(
+                        context,
+                        item.$1,
+                      );
+                    },
                   ),
                 ),
               ],
             ),
-          ),
-
-          const SizedBox(height: 18),
-
-          const Text(
-            'Nama Tugas',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-
-          const SizedBox(height: 8),
-
-          TextField(
-            controller: title,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              hintText: 'Contoh: Follow up calon anggota',
-              prefixIcon: Icon(Icons.edit_outlined),
-            ),
-          ),
-
-          const SizedBox(height: 18),
-
-          const Text(
-            'Jadwal',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-
-          const SizedBox(height: 8),
-
-          _choice(
-            Icons.calendar_month,
-            'Tanggal',
-            DateFormat(
-              'EEEE, d MMMM yyyy',
-              'id_ID',
-            ).format(date),
-            pickDate,
-          ),
-
-          _choice(
-            Icons.access_time,
-            'Waktu',
-            time.format(context),
-            pickTime,
-          ),
-
-          _choice(
-            Icons.flag_outlined,
-            'Prioritas',
-            priority,
-            _pickPriority,
-          ),
-
-          const SizedBox(height: 12),
-
-          const Text(
-            'Catatan',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-
-          const SizedBox(height: 8),
-
-          TextField(
-            controller: note,
-            maxLines: 5,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              hintText: 'Tambahkan catatan jika diperlukan...',
-              alignLabelWithHint: true,
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          SizedBox(
-            height: 56,
-            child: FilledButton.icon(
-              onPressed: _saveTask,
-              style: FilledButton.styleFrom(
-                backgroundColor: yellow,
-                foregroundColor: dark,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-              ),
-              icon: Icon(
-                isEdit ? Icons.save_outlined : Icons.add_task,
-              ),
-              label: Text(
-                isEdit ? 'Simpan Perubahan' : 'Simpan Tugas',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _choice(
-    IconData icon,
-    String label,
-    String value,
-    VoidCallback onTap,
-  ) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: Icon(icon),
-        title: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11,
-            color: darkSoft,
-          ),
-        ),
-        subtitle: Text(
-          value,
-          style: const TextStyle(
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        trailing: const Icon(
-          Icons.chevron_right,
-        ),
-        onTap: onTap,
-      ),
-    );
-  }
-
-  Future<void> _pickPriority() async {
-    final result = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (_) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(10),
-                child: Text(
-                  'Pilih Prioritas',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-              _priorityOption('Tinggi', red),
-              _priorityOption('Sedang', orange),
-              _priorityOption('Rendah', green),
-              const SizedBox(height: 10),
-            ],
           ),
         );
       },
@@ -1681,45 +1218,28 @@ class _AddTaskPageState extends State<AddTaskPage> {
     }
   }
 
-  Widget _priorityOption(
-    String value,
-    Color color,
-  ) {
-    return ListTile(
-      leading: Icon(
-        Icons.flag,
-        color: color,
-      ),
-      title: Text(
-        value,
-        style: const TextStyle(
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-      onTap: () => Navigator.pop(context, value),
-    );
-  }
+  Future<void> saveTask() async {
+    final title = titleController.text.trim();
 
-  Future<void> _saveTask() async {
-    final taskTitle = title.text.trim();
-
-    if (taskTitle.isEmpty) {
+    if (title.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Nama tugas belum diisi.'),
+          content: Text(
+            'Nama tugas belum diisi.',
+          ),
         ),
       );
       return;
     }
 
-    if (isEdit) {
+    if (editing) {
       final task = widget.task!;
 
-      task.title = taskTitle;
+      task.title = title;
       task.date = date;
       task.time = time;
       task.priority = priority;
-      task.note = note.text.trim();
+      task.note = noteController.text.trim();
 
       await widget.store.updateTask(task);
     } else {
@@ -1727,20 +1247,475 @@ class _AddTaskPageState extends State<AddTaskPage> {
         id: DateTime.now()
             .microsecondsSinceEpoch
             .toString(),
-        title: taskTitle,
+        title: title,
         date: date,
         time: time,
         priority: priority,
-        note: note.text.trim(),
+        note: noteController.text.trim(),
       );
 
       await widget.store.addTask(task);
     }
 
-    if (mounted) {
-      Navigator.pop(context);
-    }
+    if (!mounted) return;
+
+    Navigator.pop(context);
   }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          editing ? 'Edit Tugas' : 'Tambah Tugas',
+          style: const TextStyle(
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(
+          20,
+          10,
+          20,
+          30,
+        ),
+        children: [
+          const Text(
+            'Nama Tugas',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          TextField(
+            controller: titleController,
+            autofocus: !editing,
+            textInputAction:
+                TextInputAction.next,
+            decoration: const InputDecoration(
+              hintText: 'Contoh: Rapat tim marketing',
+              prefixIcon: Icon(Icons.edit_outlined),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          _choiceCard(
+            icon: Icons.calendar_month,
+            title: 'Tanggal',
+            value: formatDate(date),
+            onTap: pickDate,
+          ),
+
+          const SizedBox(height: 10),
+
+          _choiceCard(
+            icon: Icons.access_time,
+            title: 'Waktu',
+            value: timeText(time),
+            onTap: pickTime,
+          ),
+
+          const SizedBox(height: 10),
+
+          _choiceCard(
+            icon: Icons.flag_outlined,
+            title: 'Prioritas',
+            value: priority,
+            onTap: pickPriority,
+          ),
+
+          const SizedBox(height: 20),
+
+          const Text(
+            'Catatan',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          TextField(
+            controller: noteController,
+            maxLines: 5,
+            decoration: const InputDecoration(
+              hintText:
+                  'Tambahkan catatan jika diperlukan...',
+              alignLabelWithHint: true,
+            ),
+          ),
+
+          const SizedBox(height: 25),
+
+          SizedBox(
+            height: 56,
+            child: FilledButton.icon(
+              onPressed: saveTask,
+              style: FilledButton.styleFrom(
+                backgroundColor: lifeYellow,
+                foregroundColor: lifeDark,
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(17),
+                ),
+              ),
+              icon: Icon(
+                editing
+                    ? Icons.save_outlined
+                    : Icons.add_task,
+              ),
+              label: Text(
+                editing
+                    ? 'Simpan Perubahan'
+                    : 'Simpan Tugas',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _choiceCard({
+    required IconData icon,
+    required String title,
+    required String value,
+    required VoidCallback onTap,
+  }) {
+    return Card(
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 4,
+        ),
+        leading: Container(
+          width: 43,
+          height: 43,
+          decoration: BoxDecoration(
+            color: lifeYellow.withOpacity(.20),
+            borderRadius: BorderRadius.circular(13),
+          ),
+          child: Icon(
+            icon,
+            color: lifeDark,
+          ),
+        ),
+        title: Text(
+          title,
+          style: const TextStyle(
+            fontSize: 12,
+            color: Colors.black54,
+          ),
+        ),
+        subtitle: Text(
+          value,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        trailing: const Icon(
+          Icons.chevron_right,
+        ),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+// ============================================================
+// TASK TILE
+// ============================================================
+
+Widget _taskTile(
+  BuildContext context,
+  Task task,
+  LifePlusStore store,
+) {
+  return Card(
+    margin: const EdgeInsets.only(bottom: 9),
+    child: InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onLongPress: () {
+        _taskActions(
+          context,
+          task,
+          store,
+        );
+      },
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AddTaskPage(
+              store: store,
+              task: task,
+            ),
+          ),
+        );
+      },
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Row(
+          children: [
+            Checkbox(
+              value: task.done,
+              activeColor: lifeGreen,
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(5),
+              ),
+              onChanged: (value) async {
+                task.done = value ?? false;
+                await store.updateTask(task);
+              },
+            ),
+
+            Expanded(
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    task.title,
+                    maxLines: 2,
+                    overflow:
+                        TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      decoration: task.done
+                          ? TextDecoration.lineThrough
+                          : null,
+                      color: task.done
+                          ? Colors.black45
+                          : lifeDark,
+                    ),
+                  ),
+
+                  const SizedBox(height: 5),
+
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.calendar_today_outlined,
+                        size: 13,
+                        color: Colors.black45,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        formatShortDate(task.date),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.black54,
+                        ),
+                      ),
+                      const SizedBox(width: 9),
+                      const Icon(
+                        Icons.access_time,
+                        size: 13,
+                        color: Colors.black45,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        timeText(task.time),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.black54,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(width: 8),
+
+            _priorityChip(task.priority),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _priorityChip(String priority) {
+  Color color;
+
+  if (priority == 'Tinggi') {
+    color = lifeRed;
+  } else if (priority == 'Sedang') {
+    color = lifeOrange;
+  } else {
+    color = lifeGreen;
+  }
+
+  return Container(
+    padding: const EdgeInsets.symmetric(
+      horizontal: 9,
+      vertical: 6,
+    ),
+    decoration: BoxDecoration(
+      color: color.withOpacity(.12),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Text(
+      priority,
+      style: TextStyle(
+        color: color,
+        fontWeight: FontWeight.w800,
+        fontSize: 10,
+      ),
+    ),
+  );
+}
+
+Future<void> _taskActions(
+  BuildContext context,
+  Task task,
+  LifePlusStore store,
+) async {
+  await showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(
+        top: Radius.circular(25),
+      ),
+    ),
+    builder: (context) {
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(18),
+              child: Text(
+                'Kelola Tugas',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+
+            ListTile(
+              leading: const Icon(
+                Icons.edit_outlined,
+                color: lifeBlue,
+              ),
+              title: const Text('Edit tugas'),
+              onTap: () {
+                Navigator.pop(context);
+
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AddTaskPage(
+                      store: store,
+                      task: task,
+                    ),
+                  ),
+                );
+              },
+            ),
+
+            ListTile(
+              leading: Icon(
+                task.done
+                    ? Icons.undo
+                    : Icons.check_circle_outline,
+                color: lifeGreen,
+              ),
+              title: Text(
+                task.done
+                    ? 'Tandai belum selesai'
+                    : 'Tandai selesai',
+              ),
+              onTap: () async {
+                Navigator.pop(context);
+
+                task.done = !task.done;
+
+                await store.updateTask(task);
+              },
+            ),
+
+            ListTile(
+              leading: const Icon(
+                Icons.delete_outline,
+                color: lifeRed,
+              ),
+              title: const Text(
+                'Hapus tugas',
+                style: TextStyle(
+                  color: lifeRed,
+                ),
+              ),
+              onTap: () async {
+                Navigator.pop(context);
+
+                final confirm =
+                    await showDialog<bool>(
+                  context: context,
+                  builder: (context) {
+                    return AlertDialog(
+                      title: const Text(
+                        'Hapus tugas?',
+                      ),
+                      content: Text(
+                        'Tugas "${task.title}" akan dihapus.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () {
+                            Navigator.pop(
+                              context,
+                              false,
+                            );
+                          },
+                          child:
+                              const Text('Batal'),
+                        ),
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: lifeRed,
+                          ),
+                          onPressed: () {
+                            Navigator.pop(
+                              context,
+                              true,
+                            );
+                          },
+                          child:
+                              const Text('Hapus'),
+                        ),
+                      ],
+                    );
+                  },
+                );
+
+                if (confirm == true) {
+                  await store.deleteTask(
+                    task.id,
+                  );
+                }
+              },
+            ),
+
+            const SizedBox(height: 10),
+          ],
+        ),
+      );
+    },
+  );
 }
 
 // ============================================================
@@ -1756,581 +1731,198 @@ class ReminderPage extends StatefulWidget {
   });
 
   @override
-  State<ReminderPage> createState() => _ReminderPageState();
+  State<ReminderPage> createState() =>
+      _ReminderPageState();
 }
 
-class _ReminderPageState extends State<ReminderPage> {
-  @override
-  Widget build(BuildContext context) {
-    final reminders = [...widget.store.reminders];
-
-    reminders.sort((a, b) {
-      return _minutes(a.time).compareTo(
-        _minutes(b.time),
-      );
-    });
-
-    final active =
-        reminders.where((r) => r.active).length;
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
-      children: [
-        Row(
-          children: [
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Pengingat',
-                    style: TextStyle(
-                      fontSize: 29,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  SizedBox(height: 3),
-                  Text(
-                    'Jangan lewatkan aktivitas penting.',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: darkSoft,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 10,
-              ),
-              decoration: BoxDecoration(
-                color: yellowSoft,
-                borderRadius: BorderRadius.circular(15),
-              ),
-              child: Text(
-                '$active aktif',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 18),
-
-        if (reminders.isEmpty)
-          _emptyReminder()
-        else
-          ...reminders.map(
-            (reminder) => _reminderCard(
-              context,
-              reminder,
-            ),
-          ),
-
-        const SizedBox(height: 12),
-
-        SizedBox(
-          height: 54,
-          child: FilledButton.icon(
-            onPressed: _addReminder,
-            style: FilledButton.styleFrom(
-              backgroundColor: yellow,
-              foregroundColor: dark,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
-              ),
-            ),
-            icon: const Icon(Icons.add_alarm),
-            label: const Text(
-              'Tambah Pengingat',
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 16),
-
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: blue.withOpacity(.08),
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: const Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                Icons.info_outline,
-                color: blue,
-              ),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Pengingat V2 tersimpan di perangkat. '
-                  'Notifikasi sistem Android otomatis akan '
-                  'kita aktifkan pada tahap V3.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: darkSoft,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _reminderCard(
-    BuildContext context,
-    Reminder reminder,
-  ) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: () => _editReminder(reminder),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  color: reminder.active
-                      ? yellowSoft
-                      : Colors.black12,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Icon(
-                  Icons.notifications,
-                  color: reminder.active
-                      ? dark
-                      : darkSoft,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      reminder.title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Text(
-                          reminder.time.format(context),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding:
-                              const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(.05),
-                            borderRadius:
-                                BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            reminder.repeat,
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: darkSoft,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              Switch(
-                value: reminder.active,
-                activeColor: yellow,
-                onChanged: (value) async {
-                  reminder.active = value;
-
-                  await widget.store
-                      .updateReminder(reminder);
-
-                  setState(() {});
-                },
-              ),
-              PopupMenuButton<String>(
-                onSelected: (value) async {
-                  if (value == 'edit') {
-                    await _editReminder(reminder);
-                  }
-
-                  if (value == 'delete') {
-                    await _deleteReminder(reminder);
-                  }
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(
-                    value: 'edit',
-                    child: Text('Edit'),
-                  ),
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: Text('Hapus'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _emptyReminder() {
-    return Container(
-      padding: const EdgeInsets.all(30),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: const Column(
-        children: [
-          Icon(
-            Icons.notifications_none,
-            size: 60,
-            color: blue,
-          ),
-          SizedBox(height: 12),
-          Text(
-            'Belum ada pengingat',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          SizedBox(height: 6),
-          Text(
-            'Buat pengingat agar aktivitas penting tidak terlupakan.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: darkSoft,
-              fontSize: 12,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _addReminder() async {
-    await _reminderForm();
-  }
-
-  Future<void> _editReminder(
-    Reminder reminder,
-  ) async {
-    await _reminderForm(
-      reminder: reminder,
-    );
-  }
-
-  Future<void> _reminderForm({
-    Reminder? reminder,
+class _ReminderPageState
+    extends State<ReminderPage> {
+  Future<void> addReminder({
+    Reminder? existing,
   }) async {
-    final titleController = TextEditingController(
-      text: reminder?.title ?? '',
+    final titleController =
+        TextEditingController(
+      text: existing?.title ?? '',
     );
 
-    DateTime date =
-        reminder?.date ?? DateTime.now();
+    TimeOfDay selectedTime =
+        existing?.time ?? TimeOfDay.now();
 
-    TimeOfDay time =
-        reminder?.time ?? TimeOfDay.now();
+    bool repeatDaily =
+        existing?.repeatDaily ?? false;
 
-    String repeat =
-        reminder?.repeat ?? 'Sekali';
-
-    final result = await showModalBottomSheet<bool>(
+    final result =
+        await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      showDragHandle: true,
-      builder: (sheetContext) {
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(28),
+        ),
+      ),
+      builder: (context) {
         return StatefulBuilder(
-          builder: (context, setSheetState) {
+          builder: (context, setModalState) {
             return Padding(
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 10,
-                bottom: MediaQuery.of(context)
+              padding: EdgeInsets.fromLTRB(
+                20,
+                20,
+                20,
+                MediaQuery.of(context)
                         .viewInsets
                         .bottom +
                     20,
               ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      reminder == null
-                          ? 'Tambah Pengingat'
-                          : 'Edit Pengingat',
-                      style: const TextStyle(
-                        fontSize: 21,
-                        fontWeight: FontWeight.w900,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 45,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: Colors.black12,
+                      borderRadius:
+                          BorderRadius.circular(10),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  Text(
+                    existing == null
+                        ? 'Tambah Pengingat'
+                        : 'Edit Pengingat',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  TextField(
+                    controller: titleController,
+                    decoration:
+                        const InputDecoration(
+                      prefixIcon: Icon(
+                        Icons.notifications_none,
+                      ),
+                      hintText:
+                          'Contoh: Waktu olahraga',
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  ListTile(
+                    tileColor: background,
+                    shape: RoundedRectangleBorder(
+                      borderRadius:
+                          BorderRadius.circular(16),
+                    ),
+                    leading: const Icon(
+                      Icons.access_time,
+                    ),
+                    title: const Text(
+                      'Waktu',
+                    ),
+                    subtitle: Text(
+                      timeText(selectedTime),
+                    ),
+                    trailing: const Icon(
+                      Icons.chevron_right,
+                    ),
+                    onTap: () async {
+                      final selected =
+                          await showTimePicker(
+                        context: context,
+                        initialTime:
+                            selectedTime,
+                      );
+
+                      if (selected != null) {
+                        setModalState(() {
+                          selectedTime = selected;
+                        });
+                      }
+                    },
+                  ),
+
+                  const SizedBox(height: 5),
+
+                  SwitchListTile(
+                    contentPadding:
+                        EdgeInsets.zero,
+                    title: const Text(
+                      'Ulangi setiap hari',
+                      style: TextStyle(
+                        fontWeight:
+                            FontWeight.w700,
                       ),
                     ),
-
-                    const SizedBox(height: 18),
-
-                    TextField(
-                      controller: titleController,
-                      decoration: const InputDecoration(
-                        hintText:
-                            'Nama pengingat...',
-                        prefixIcon: Icon(
-                          Icons.notifications_none,
-                        ),
-                      ),
+                    subtitle: const Text(
+                      'Pengingat aktif setiap hari',
                     ),
+                    value: repeatDaily,
+                    activeColor: lifeYellow,
+                    onChanged: (value) {
+                      setModalState(() {
+                        repeatDaily = value;
+                      });
+                    },
+                  ),
 
-                    const SizedBox(height: 12),
+                  const SizedBox(height: 15),
 
-                    ListTile(
-                      tileColor: background,
-                      shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(16),
-                      ),
-                      leading: const Icon(
-                        Icons.calendar_month,
-                      ),
-                      title: const Text(
-                        'Tanggal',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: darkSoft,
-                        ),
-                      ),
-                      subtitle: Text(
-                        DateFormat(
-                          'EEEE, d MMMM yyyy',
-                          'id_ID',
-                        ).format(date),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      trailing: const Icon(
-                        Icons.chevron_right,
-                      ),
-                      onTap: () async {
-                        final selected =
-                            await showDatePicker(
-                          context: context,
-                          initialDate: date,
-                          firstDate: DateTime.now()
-                              .subtract(
-                            const Duration(
-                              days: 3650,
-                            ),
-                          ),
-                          lastDate:
-                              DateTime.now().add(
-                            const Duration(
-                              days: 3650,
-                            ),
-                          ),
-                          locale:
-                              const Locale('id', 'ID'),
-                        );
-
-                        if (selected != null) {
-                          setSheetState(() {
-                            date = selected;
-                          });
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: FilledButton(
+                      onPressed: () {
+                        if (titleController
+                            .text
+                            .trim()
+                            .isEmpty) {
+                          return;
                         }
-                      },
-                    ),
 
-                    const SizedBox(height: 8),
-
-                    ListTile(
-                      tileColor: background,
-                      shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(16),
-                      ),
-                      leading: const Icon(
-                        Icons.access_time,
-                      ),
-                      title: const Text(
-                        'Waktu',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: darkSoft,
-                        ),
-                      ),
-                      subtitle: Text(
-                        time.format(context),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      trailing: const Icon(
-                        Icons.chevron_right,
-                      ),
-                      onTap: () async {
-                        final selected =
-                            await showTimePicker(
-                          context: context,
-                          initialTime: time,
-                        );
-
-                        if (selected != null) {
-                          setSheetState(() {
-                            time = selected;
-                          });
+                        if (existing != null) {
+                          existing.title =
+                              titleController
+                                  .text
+                                  .trim();
+                          existing.time =
+                              selectedTime;
+                          existing.repeatDaily =
+                              repeatDaily;
                         }
-                      },
-                    ),
 
-                    const SizedBox(height: 8),
-
-                    ListTile(
-                      tileColor: background,
-                      shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(16),
-                      ),
-                      leading: const Icon(
-                        Icons.repeat,
-                      ),
-                      title: const Text(
-                        'Pengulangan',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: darkSoft,
-                        ),
-                      ),
-                      subtitle: Text(
-                        repeat,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      trailing: const Icon(
-                        Icons.chevron_right,
-                      ),
-                      onTap: () async {
-                        final selected =
-                            await showModalBottomSheet<
-                                String>(
-                          context: context,
-                          showDragHandle: true,
-                          builder: (_) {
-                            return SafeArea(
-                              child: Column(
-                                mainAxisSize:
-                                    MainAxisSize.min,
-                                children: [
-                                  _repeatOption(
-                                    context,
-                                    'Sekali',
-                                  ),
-                                  _repeatOption(
-                                    context,
-                                    'Setiap Hari',
-                                  ),
-                                  _repeatOption(
-                                    context,
-                                    'Setiap Minggu',
-                                  ),
-                                  const SizedBox(
-                                    height: 10,
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
+                        Navigator.pop(
+                          context,
+                          true,
                         );
-
-                        if (selected != null) {
-                          setSheetState(() {
-                            repeat = selected;
-                          });
-                        }
                       },
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: FilledButton.icon(
-                        onPressed: () {
-                          if (titleController.text
-                              .trim()
-                              .isEmpty) {
-                            ScaffoldMessenger.of(
-                              context,
-                            ).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Nama pengingat belum diisi.',
-                                ),
-                              ),
-                            );
-                            return;
-                          }
-
-                          Navigator.pop(
-                            sheetContext,
-                            true,
-                          );
-                        },
+                      style:
+                          FilledButton.styleFrom(
+                        backgroundColor:
+                            lifeYellow,
+                        foregroundColor:
+                            lifeDark,
+                      ),
+                      child: Text(
+                        existing == null
+                            ? 'Simpan Pengingat'
+                            : 'Simpan Perubahan',
                         style:
-                            FilledButton.styleFrom(
-                          backgroundColor: yellow,
-                          foregroundColor: dark,
-                        ),
-                        icon: const Icon(
-                          Icons.save_outlined,
-                        ),
-                        label: Text(
-                          reminder == null
-                              ? 'Simpan Pengingat'
-                              : 'Simpan Perubahan',
-                          style: const TextStyle(
-                            fontWeight:
-                                FontWeight.w900,
-                          ),
+                            const TextStyle(
+                          fontWeight:
+                              FontWeight.w900,
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             );
           },
@@ -2338,93 +1930,338 @@ class _ReminderPageState extends State<ReminderPage> {
       },
     );
 
-    if (result == true) {
-      if (reminder == null) {
-        await widget.store.addReminder(
-          Reminder(
-            id: DateTime.now()
-                .microsecondsSinceEpoch
-                .toString(),
-            title: titleController.text.trim(),
-            date: date,
-            time: time,
-            repeat: repeat,
-          ),
-        );
-      } else {
-        reminder.title =
-            titleController.text.trim();
-        reminder.date = date;
-        reminder.time = time;
-        reminder.repeat = repeat;
-
-        await widget.store
-            .updateReminder(reminder);
-      }
-
-      setState(() {});
-    }
+    final title =
+        titleController.text.trim();
 
     titleController.dispose();
+
+    if (result != true || title.isEmpty) {
+      return;
+    }
+
+    if (existing != null) {
+      await widget.store
+          .updateReminder(existing);
+    } else {
+      await widget.store.addReminder(
+        Reminder(
+          id: DateTime.now()
+              .microsecondsSinceEpoch
+              .toString(),
+          title: title,
+          time: selectedTime,
+          repeatDaily: repeatDaily,
+        ),
+      );
+    }
   }
 
-  Widget _repeatOption(
-    BuildContext context,
-    String value,
-  ) {
-    return ListTile(
-      leading: const Icon(Icons.repeat),
-      title: Text(value),
-      onTap: () {
-        Navigator.pop(context, value);
-      },
+  @override
+  Widget build(BuildContext context) {
+    final reminders =
+        [...widget.store.reminders];
+
+    reminders.sort(
+      (a, b) => timeToMinutes(a.time)
+          .compareTo(timeToMinutes(b.time)),
     );
-  }
 
-  Future<void> _deleteReminder(
-    Reminder reminder,
-  ) async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text(
-          'Hapus pengingat?',
+    return Scaffold(
+      backgroundColor: background,
+      floatingActionButton:
+          FloatingActionButton.extended(
+        onPressed: () => addReminder(),
+        backgroundColor: lifeYellow,
+        foregroundColor: lifeDark,
+        icon: const Icon(Icons.add),
+        label: const Text(
+          'Tambah',
           style: TextStyle(
             fontWeight: FontWeight.w800,
           ),
         ),
-        content: Text(
-          'Pengingat "${reminder.title}" akan dihapus.',
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(
+          20,
+          24,
+          20,
+          100,
         ),
-        actions: [
-          TextButton(
-            onPressed: () =>
-                Navigator.pop(context, false),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: red,
+        children: [
+          const Text(
+            'Pengingat',
+            style: TextStyle(
+              fontSize: 29,
+              fontWeight: FontWeight.w900,
             ),
-            onPressed: () =>
-                Navigator.pop(context, true),
-            child: const Text('Hapus'),
+          ),
+
+          const SizedBox(height: 5),
+
+          const Text(
+            'Atur waktu agar tidak ada hal penting yang terlewat.',
+            style: TextStyle(
+              color: Colors.black54,
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          if (reminders.isEmpty)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(28),
+                child: Column(
+                  children: [
+                    const Icon(
+                      Icons.notifications_none,
+                      size: 58,
+                      color: Colors.black26,
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Belum ada pengingat',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight:
+                            FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    const Text(
+                      'Tambahkan pengingat pertama Anda.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            ...reminders.map(
+              (reminder) =>
+                  _reminderCard(reminder),
+            ),
+
+          const SizedBox(height: 20),
+
+          Card(
+            color: const Color(0xFFFFF9D7),
+            child: const Padding(
+              padding: EdgeInsets.all(16),
+              child: Row(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    color: lifeOrange,
+                  ),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Pengingat V2 tersimpan di HP. Notifikasi sistem Android akan kita aktifkan pada tahap berikutnya.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
     );
+  }
 
-    if (result == true) {
-      await widget.store
-          .deleteReminder(reminder.id);
+  Widget _reminderCard(
+    Reminder reminder,
+  ) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 6,
+        ),
+        leading: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: reminder.active
+                ? lifeYellow
+                : Colors.black12,
+            borderRadius:
+                BorderRadius.circular(15),
+          ),
+          child: Icon(
+            reminder.repeatDaily
+                ? Icons.repeat
+                : Icons.notifications,
+            color: reminder.active
+                ? lifeDark
+                : Colors.black38,
+          ),
+        ),
+        title: Text(
+          reminder.title,
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: reminder.active
+                ? lifeDark
+                : Colors.black45,
+          ),
+        ),
+        subtitle: Text(
+          '${timeText(reminder.time)} • ${reminder.repeatDaily ? 'Setiap hari' : 'Sekali'}',
+        ),
+        trailing: Switch(
+          value: reminder.active,
+          activeColor: lifeYellow,
+          onChanged: (value) async {
+            reminder.active = value;
 
-      setState(() {});
-    }
+            await widget.store
+                .updateReminder(reminder);
+          },
+        ),
+        onTap: () {
+          addReminder(
+            existing: reminder,
+          );
+        },
+        onLongPress: () async {
+          await _reminderActions(
+            reminder,
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _reminderActions(
+    Reminder reminder,
+  ) async {
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(25),
+        ),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(18),
+                child: Text(
+                  'Kelola Pengingat',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.edit_outlined,
+                  color: lifeBlue,
+                ),
+                title: const Text(
+                  'Edit pengingat',
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+
+                  addReminder(
+                    existing: reminder,
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline,
+                  color: lifeRed,
+                ),
+                title: const Text(
+                  'Hapus pengingat',
+                  style: TextStyle(
+                    color: lifeRed,
+                  ),
+                ),
+                onTap: () async {
+                  Navigator.pop(context);
+
+                  final confirm =
+                      await showDialog<bool>(
+                    context: context,
+                    builder: (context) {
+                      return AlertDialog(
+                        title: const Text(
+                          'Hapus pengingat?',
+                        ),
+                        content: Text(
+                          'Pengingat "${reminder.title}" akan dihapus.',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () {
+                              Navigator.pop(
+                                context,
+                                false,
+                              );
+                            },
+                            child:
+                                const Text('Batal'),
+                          ),
+                          FilledButton(
+                            style:
+                                FilledButton.styleFrom(
+                              backgroundColor:
+                                  lifeRed,
+                            ),
+                            onPressed: () {
+                              Navigator.pop(
+                                context,
+                                true,
+                              );
+                            },
+                            child:
+                                const Text('Hapus'),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+
+                  if (confirm == true) {
+                    await widget.store
+                        .deleteReminder(
+                      reminder.id,
+                    );
+                  }
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 
 // ============================================================
-// STATISTICS
+// STATISTICS PAGE
 // ============================================================
 
 class StatsPage extends StatefulWidget {
@@ -2436,10 +2273,12 @@ class StatsPage extends StatefulWidget {
   });
 
   @override
-  State<StatsPage> createState() => _StatsPageState();
+  State<StatsPage> createState() =>
+      _StatsPageState();
 }
 
-class _StatsPageState extends State<StatsPage> {
+class _StatsPageState
+    extends State<StatsPage> {
   int period = 0;
 
   @override
@@ -2452,14 +2291,14 @@ class _StatsPageState extends State<StatsPage> {
 
     final pending = total - done;
 
-    final pct = total == 0
+    final percentage = total == 0
         ? 0
         : ((done / total) * 100).round();
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(
         20,
-        20,
+        24,
         20,
         30,
       ),
@@ -2472,17 +2311,16 @@ class _StatsPageState extends State<StatsPage> {
           ),
         ),
 
-        const SizedBox(height: 3),
+        const SizedBox(height: 5),
 
         const Text(
           'Lihat perkembangan produktivitas Anda.',
           style: TextStyle(
-            fontSize: 13,
-            color: darkSoft,
+            color: Colors.black54,
           ),
         ),
 
-        const SizedBox(height: 18),
+        const SizedBox(height: 20),
 
         SegmentedButton<int>(
           segments: const [
@@ -2509,271 +2347,239 @@ class _StatsPageState extends State<StatsPage> {
 
         const SizedBox(height: 18),
 
-        // MAIN SCORE
-        Container(
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 130,
-                height: 130,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    SizedBox(
-                      width: 120,
-                      height: 120,
-                      child: CircularProgressIndicator(
-                        value: total == 0
-                            ? 0
-                            : done / total,
-                        strokeWidth: 13,
-                        backgroundColor:
-                            Colors.black12,
-                        color: green,
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(22),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 125,
+                  height: 125,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      SizedBox(
+                        width: 120,
+                        height: 120,
+                        child:
+                            CircularProgressIndicator(
+                          value: total == 0
+                              ? 0
+                              : done / total,
+                          strokeWidth: 13,
+                          backgroundColor:
+                              Colors.black12,
+                          color: lifeGreen,
+                        ),
                       ),
-                    ),
-                    Column(
-                      mainAxisSize:
-                          MainAxisSize.min,
-                      children: [
-                        Text(
-                          '$pct%',
-                          style: const TextStyle(
-                            fontSize: 27,
-                            fontWeight: FontWeight.w900,
+                      Column(
+                        mainAxisSize:
+                            MainAxisSize.min,
+                        children: [
+                          Text(
+                            '$percentage%',
+                            style:
+                                const TextStyle(
+                              fontSize: 25,
+                              fontWeight:
+                                  FontWeight.w900,
+                            ),
                           ),
-                        ),
-                        const Text(
-                          'Produktif',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: darkSoft,
+                          const Text(
+                            'Selesai',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color:
+                                  Colors.black54,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(width: 18),
-
-              Expanded(
-                child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                  children: [
-                    _legend(
-                      green,
-                      'Selesai',
-                      done,
-                    ),
-                    _legend(
-                      blue,
-                      'Belum selesai',
-                      pending,
-                    ),
-                    _legend(
-                      red,
-                      'Terlambat',
-                      _lateCount(),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 14),
-
-        // STAT CARDS
-        Row(
-          children: [
-            Expanded(
-              child: _numberCard(
-                'Total',
-                '$total',
-                Icons.assignment_outlined,
-                blue,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _numberCard(
-                'Selesai',
-                '$done',
-                Icons.check_circle_outline,
-                green,
-              ),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 10),
-
-        Row(
-          children: [
-            Expanded(
-              child: _numberCard(
-                'Belum',
-                '$pending',
-                Icons.pending_actions,
-                orange,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _numberCard(
-                'Terlambat',
-                '${_lateCount()}',
-                Icons.warning_amber_outlined,
-                red,
-              ),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 18),
-
-        // WEEKLY CHART
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Aktivitas 7 Hari',
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Jumlah tugas yang selesai',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: darkSoft,
-                ),
-              ),
-              const SizedBox(height: 20),
-              _weeklyChart(),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 18),
-
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: yellowSoft,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 45,
-                height: 45,
-                decoration: BoxDecoration(
-                  color: yellow,
-                  borderRadius:
-                      BorderRadius.circular(14),
-                ),
-                child: const Icon(
-                  Icons.emoji_events,
-                  color: dark,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  _motivation(pct),
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
+                        ],
+                      ),
+                    ],
                   ),
                 ),
+
+                const SizedBox(width: 22),
+
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: [
+                      _legend(
+                        lifeGreen,
+                        'Selesai',
+                        done,
+                      ),
+                      _legend(
+                        lifeBlue,
+                        'Belum selesai',
+                        pending,
+                      ),
+                      _legend(
+                        lifeRed,
+                        'Terlambat',
+                        _lateTasks(),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 18),
+
+        Row(
+          children: [
+            Expanded(
+              child: _statBox(
+                '$total',
+                'Total',
+                lifeBlue,
               ),
-            ],
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _statBox(
+                '$done',
+                'Selesai',
+                lifeGreen,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _statBox(
+                '$pending',
+                'Belum',
+                lifeOrange,
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 18),
+
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment:
+                  CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Perkembangan Mingguan',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+
+                const SizedBox(height: 22),
+
+                SizedBox(
+                  height: 150,
+                  child: _weeklyChart(),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 18),
+
+        Card(
+          color: const Color(0xFFFFF9D7),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Row(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration:
+                      const BoxDecoration(
+                    color: lifeYellow,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.emoji_events,
+                    color: lifeDark,
+                  ),
+                ),
+                const SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Tetap semangat!',
+                        style: TextStyle(
+                          fontWeight:
+                              FontWeight.w900,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        total == 0
+                            ? 'Mulai buat tugas untuk melihat perkembangan Anda.'
+                            : 'Anda sudah menyelesaikan $percentage% dari semua tugas.',
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ],
     );
   }
 
-  Widget _numberCard(
-    String label,
-    String value,
-    IconData icon,
-    Color color,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(17),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
-        children: [
-          Icon(
-            icon,
-            color: color,
-            size: 27,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 11,
-              color: darkSoft,
-            ),
-          ),
-        ],
-      ),
-    );
+  int _lateTasks() {
+    final now = DateTime.now();
+
+    return widget.store.tasks.where((task) {
+      if (task.done) return false;
+
+      final dateTime = DateTime(
+        task.date.year,
+        task.date.month,
+        task.date.day,
+        task.time.hour,
+        task.time.minute,
+      );
+
+      return dateTime.isBefore(now);
+    }).length;
   }
 
   Widget _legend(
     Color color,
     String label,
-    int number,
+    int value,
   ) {
     return Padding(
-      padding: const EdgeInsets.symmetric(
-        vertical: 6,
-      ),
+      padding:
+          const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
           Container(
-            width: 10,
-            height: 10,
+            width: 9,
+            height: 9,
             decoration: BoxDecoration(
               color: color,
               shape: BoxShape.circle,
             ),
           ),
-          const SizedBox(width: 9),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
               label,
@@ -2783,9 +2589,9 @@ class _StatsPageState extends State<StatsPage> {
             ),
           ),
           Text(
-            '$number',
+            '$value',
             style: const TextStyle(
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ],
@@ -2793,119 +2599,126 @@ class _StatsPageState extends State<StatsPage> {
     );
   }
 
-  Widget _weeklyChart() {
-    final now = DateTime.now();
-
-    final days = List.generate(
-      7,
-      (index) => DateTime(
-        now.year,
-        now.month,
-        now.day - (6 - index),
-      ),
-    );
-
-    final values = days.map((day) {
-      return widget.store.tasks.where((task) {
-        return task.done &&
-            _sameDay(task.date, day);
-      }).length;
-    }).toList();
-
-    final maxValue =
-        values.fold<int>(1, (max, value) {
-      return value > max ? value : max;
-    });
-
-    return SizedBox(
-      height: 190,
-      child: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.end,
-        mainAxisAlignment:
-            MainAxisAlignment.spaceAround,
-        children: List.generate(
-          7,
-          (index) {
-            final value = values[index];
-
-            final height = value == 0
-                ? 12.0
-                : 30 +
-                    (value / maxValue) * 105;
-
-            return Column(
-              mainAxisAlignment:
-                  MainAxisAlignment.end,
-              children: [
-                Text(
-                  '$value',
-                  style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Container(
-                  width: 24,
-                  height: height,
-                  decoration: BoxDecoration(
-                    color: green,
-                    borderRadius:
-                        BorderRadius.circular(8),
-                  ),
-                ),
-                const SizedBox(height: 7),
-                Text(
-                  DateFormat(
-                    'EEE',
-                    'id_ID',
-                  ).format(days[index]),
-                  style: const TextStyle(
-                    fontSize: 10,
-                    color: darkSoft,
-                  ),
-                ),
-              ],
-            );
-          },
+  Widget _statBox(
+    String value,
+    String label,
+    Color color,
+  ) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          vertical: 16,
+          horizontal: 8,
+        ),
+        child: Column(
+          children: [
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 21,
+                fontWeight: FontWeight.w900,
+                color: color,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 10,
+                color: Colors.black54,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  int _lateCount() {
+  Widget _weeklyChart() {
     final now = DateTime.now();
 
-    return widget.store.tasks.where((task) {
-      if (task.done) return false;
+    final values = <int>[];
 
-      final taskDateTime = DateTime(
-        task.date.year,
-        task.date.month,
-        task.date.day,
-        task.time.hour,
-        task.time.minute,
-      );
+    for (int i = 6; i >= 0; i--) {
+      final day =
+          DateTime(
+            now.year,
+            now.month,
+            now.day,
+          ).subtract(
+            Duration(days: i),
+          );
 
-      return taskDateTime.isBefore(now);
-    }).length;
-  }
+      final count =
+          widget.store.tasks.where((task) {
+        return sameDay(task.date, day) &&
+            task.done;
+      }).length;
 
-  String _motivation(int pct) {
-    if (pct >= 80) {
-      return 'Luar biasa! Produktivitas Anda sangat baik. Pertahankan konsistensinya.';
+      values.add(count);
     }
 
-    if (pct >= 50) {
-      return 'Bagus! Lebih dari setengah tugas sudah selesai. Tinggal sedikit lagi.';
-    }
+    final maxValue = values.isEmpty
+        ? 1
+        : values.reduce(
+              (a, b) => a > b ? a : b,
+            ) ==
+            0
+        ? 1
+        : values.reduce(
+              (a, b) => a > b ? a : b,
+            );
 
-    if (pct > 0) {
-      return 'Tetap semangat. Selesaikan satu tugas demi satu tugas.';
-    }
+    return Row(
+      crossAxisAlignment:
+          CrossAxisAlignment.end,
+      mainAxisAlignment:
+          MainAxisAlignment.spaceAround,
+      children: List.generate(7, (index) {
+        final height =
+            25 +
+            ((values[index] / maxValue) * 85);
 
-    return 'Belum ada tugas yang selesai. Yuk mulai dari satu tugas kecil hari ini.';
+        final day =
+            now.subtract(
+              Duration(days: 6 - index),
+            );
+
+        return Column(
+          mainAxisAlignment:
+              MainAxisAlignment.end,
+          children: [
+            Text(
+              '${values[index]}',
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Container(
+              width: 25,
+              height: height,
+              decoration: BoxDecoration(
+                color:
+                    lifeGreen.withOpacity(.80),
+                borderRadius:
+                    BorderRadius.circular(8),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              formatDay(day)
+                  .substring(0, 3),
+              style: const TextStyle(
+                fontSize: 9,
+                color: Colors.black54,
+              ),
+            ),
+          ],
+        );
+      }),
+    );
   }
 }
 
@@ -2926,7 +2739,7 @@ class SettingsPage extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(
         20,
-        20,
+        24,
         20,
         30,
       ),
@@ -2939,117 +2752,35 @@ class SettingsPage extends StatelessWidget {
           ),
         ),
 
-        const SizedBox(height: 3),
+        const SizedBox(height: 5),
 
         const Text(
-          'Atur pengalaman LIFE+ Anda.',
+          'Sesuaikan LIFE+ dengan kebutuhan Anda.',
           style: TextStyle(
-            fontSize: 13,
-            color: darkSoft,
+            color: Colors.black54,
           ),
         ),
 
         const SizedBox(height: 20),
 
-        // PROFILE
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [
-                yellow,
-                Color(0xFFFFE36A),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 58,
-                height: 58,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius:
-                      BorderRadius.circular(20),
-                ),
-                child: const Icon(
-                  Icons.person,
-                  size: 31,
-                  color: dark,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Pengguna LIFE+',
-                      style: TextStyle(
-                        fontSize: 11,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      store.userName,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                onPressed: () =>
-                    _editName(context),
-                icon: const Icon(
-                  Icons.edit_outlined,
-                ),
-              ),
-            ],
-          ),
-        ),
+        _profileCard(context),
 
-        const SizedBox(height: 18),
-
-        const Text(
-          'Preferensi',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-
-        const SizedBox(height: 8),
+        const SizedBox(height: 14),
 
         Card(
           child: Column(
             children: [
-              ListTile(
-                leading: _settingIcon(
-                  Icons.notifications_none,
-                  blue,
-                ),
-                title: const Text(
-                  'Pengingat',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                subtitle: const Text(
-                  'Atur pengingat aktivitas',
-                ),
-                trailing: const Icon(
-                  Icons.chevron_right,
-                ),
+              _settingItem(
+                icon: Icons.notifications_none,
+                title: 'Pengingat',
+                subtitle:
+                    '${store.reminders.length} pengingat tersimpan',
                 onTap: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => ReminderPage(
+                      builder: (_) =>
+                          ReminderPage(
                         store: store,
                       ),
                     ),
@@ -3059,26 +2790,10 @@ class SettingsPage extends StatelessWidget {
 
               const Divider(height: 1),
 
-              ListTile(
-                leading: _settingIcon(
-                  Icons.palette_outlined,
-                  orange,
-                ),
-                title: const Text(
-                  'Tema',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                subtitle: const Text(
-                  'Tampilan terang LIFE+',
-                ),
-                trailing: const Text(
-                  'Terang',
-                  style: TextStyle(
-                    color: darkSoft,
-                  ),
-                ),
+              _settingItem(
+                icon: Icons.palette_outlined,
+                title: 'Tema',
+                subtitle: 'Terang',
                 onTap: () {
                   _showThemeInfo(context);
                 },
@@ -3086,88 +2801,90 @@ class SettingsPage extends StatelessWidget {
 
               const Divider(height: 1),
 
-              ListTile(
-                leading: _settingIcon(
-                  Icons.storage_outlined,
-                  green,
-                ),
-                title: const Text(
-                  'Data & Penyimpanan',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                subtitle: Text(
-                  '${store.tasks.length} tugas • '
-                  '${store.reminders.length} pengingat',
-                ),
-                trailing: const Icon(
-                  Icons.chevron_right,
-                ),
+              _settingItem(
+                icon: Icons.storage_outlined,
+                title: 'Data & Penyimpanan',
+                subtitle:
+                    '${store.tasks.length} tugas • ${store.reminders.length} pengingat',
                 onTap: () {
-                  _showDataInfo(context);
+                  _showStorageInfo(context);
+                },
+              ),
+
+              const Divider(height: 1),
+
+              _settingItem(
+                icon: Icons.info_outline,
+                title: 'Tentang LIFE+',
+                subtitle: 'Versi 2.0',
+                onTap: () {
+                  showAboutDialog(
+                    context: context,
+                    applicationName: 'LIFE+',
+                    applicationVersion:
+                        '2.0.0',
+                    applicationIcon:
+                        Container(
+                      width: 48,
+                      height: 48,
+                      decoration:
+                          BoxDecoration(
+                        color: lifeYellow,
+                        borderRadius:
+                            BorderRadius.circular(
+                          13,
+                        ),
+                      ),
+                      child: const Center(
+                        child: Text(
+                          'L+',
+                          style: TextStyle(
+                            fontWeight:
+                                FontWeight.w900,
+                            color: lifeDark,
+                          ),
+                        ),
+                      ),
+                    ),
+                    applicationLegalese:
+                        'Atur Hari, Raih Hidup yang Lebih Baik',
+                  );
                 },
               ),
             ],
           ),
         ),
 
-        const SizedBox(height: 18),
-
-        const Text(
-          'Tentang',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-
-        const SizedBox(height: 8),
+        const SizedBox(height: 20),
 
         Card(
-          child: ListTile(
-            leading: _settingIcon(
-              Icons.auto_awesome,
-              yellow,
-            ),
-            title: const Text(
-              'Tentang LIFE+',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            subtitle: const Text(
-              'Atur Hari, Raih Hidup yang Lebih Baik',
-            ),
-            trailing: const Text(
-              'V2.0',
-              style: TextStyle(
-                color: darkSoft,
-              ),
-            ),
-            onTap: () {
-              showAboutDialog(
-                context: context,
-                applicationName: 'LIFE+',
-                applicationVersion: '2.0.0',
-                applicationIcon:
-                    const Icon(Icons.add_circle),
-                applicationLegalese:
-                    'Atur Hari, Raih Hidup yang Lebih Baik',
-              );
-            },
-          ),
-        ),
-
-        const SizedBox(height: 22),
-
-        Center(
-          child: Text(
-            'LIFE+ V2.0',
-            style: TextStyle(
-              fontSize: 11,
-              color: Colors.black.withOpacity(.35),
-              fontWeight: FontWeight.w700,
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              children: [
+                const Icon(
+                  Icons.auto_awesome,
+                  color: lifeYellow,
+                  size: 30,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'LIFE+',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                const Text(
+                  'Atur Hari, Raih Hidup yang Lebih Baik',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.black54,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -3175,21 +2892,101 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
-  Widget _settingIcon(
-    IconData icon,
-    Color color,
-  ) {
-    return Container(
-      width: 42,
-      height: 42,
-      decoration: BoxDecoration(
-        color: color.withOpacity(.10),
-        borderRadius: BorderRadius.circular(13),
+  Widget _profileCard(BuildContext context) {
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => _editName(context),
+        child: Padding(
+          padding: const EdgeInsets.all(17),
+          child: Row(
+            children: [
+              Container(
+                width: 55,
+                height: 55,
+                decoration: const BoxDecoration(
+                  color: lifeYellow,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.person,
+                  color: lifeDark,
+                  size: 29,
+                ),
+              ),
+
+              const SizedBox(width: 14),
+
+              Expanded(
+                child: Column(
+                  crossAxisAlignment:
+                      CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      store.userName,
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    const Text(
+                      'Pengguna LIFE+',
+                      style: TextStyle(
+                        color: Colors.black54,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const Icon(
+                Icons.chevron_right,
+              ),
+            ],
+          ),
+        ),
       ),
-      child: Icon(
-        icon,
-        color: color == yellow ? dark : color,
+    );
+  }
+
+  Widget _settingItem({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      contentPadding:
+          const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 5,
       ),
+      leading: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(.05),
+          borderRadius: BorderRadius.circular(13),
+        ),
+        child: Icon(icon),
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(
+          fontSize: 11,
+        ),
+      ),
+      trailing:
+          const Icon(Icons.chevron_right),
+      onTap: onTap,
     );
   }
 
@@ -3204,42 +3001,44 @@ class SettingsPage extends StatelessWidget {
     final result =
         await showDialog<String>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text(
-          'Nama pengguna',
-          style: TextStyle(
-            fontWeight: FontWeight.w900,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text(
+            'Nama pengguna',
           ),
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization:
-              TextCapitalization.words,
-          decoration: const InputDecoration(
-            hintText: 'Masukkan nama...',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () =>
-                Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: yellow,
-              foregroundColor: dark,
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            textCapitalization:
+                TextCapitalization.words,
+            decoration:
+                const InputDecoration(
+              hintText: 'Masukkan nama',
             ),
-            onPressed: () =>
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: lifeYellow,
+                foregroundColor: lifeDark,
+              ),
+              onPressed: () {
                 Navigator.pop(
-              context,
-              controller.text,
+                  context,
+                  controller.text,
+                );
+              },
+              child: const Text('Simpan'),
             ),
-            child: const Text('Simpan'),
-          ),
-        ],
-      ),
+          ],
+        );
+      },
     );
 
     controller.dispose();
@@ -3252,146 +3051,51 @@ class SettingsPage extends StatelessWidget {
   void _showThemeInfo(
     BuildContext context,
   ) {
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      showDragHandle: true,
-      builder: (_) => const Padding(
-        padding: EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Tema LIFE+',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w900,
-              ),
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Tema'),
+          content: const Text(
+            'Saat ini LIFE+ menggunakan tema terang dengan warna utama kuning LIFE+.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () =>
+                  Navigator.pop(context),
+              child: const Text('Tutup'),
             ),
-            SizedBox(height: 10),
-            Text(
-              'Saat ini LIFE+ menggunakan tema terang dengan identitas warna kuning, hitam, hijau dan putih.',
-              style: TextStyle(
-                color: darkSoft,
-              ),
-            ),
-            SizedBox(height: 20),
           ],
-        ),
-      ),
+        );
+      },
     );
   }
 
-  void _showDataInfo(
+  void _showStorageInfo(
     BuildContext context,
   ) {
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      showDragHandle: true,
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Data LIFE+',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w900,
-              ),
+      builder: (context) {
+        return AlertDialog(
+          title: const Text(
+            'Data & Penyimpanan',
+          ),
+          content: Text(
+            'Data LIFE+ disimpan secara lokal di HP.\n\n'
+            'Tugas: ${store.tasks.length}\n'
+            'Pengingat: ${store.reminders.length}\n\n'
+            'Data akan tetap tersedia selama data aplikasi tidak dihapus.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () =>
+                  Navigator.pop(context),
+              child: const Text('Tutup'),
             ),
-            const SizedBox(height: 18),
-            ListTile(
-              leading: const Icon(
-                Icons.task_alt,
-                color: green,
-              ),
-              title: const Text('Tugas'),
-              trailing: Text(
-                '${store.tasks.length}',
-              ),
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.notifications,
-                color: blue,
-              ),
-              title: const Text('Pengingat'),
-              trailing: Text(
-                '${store.reminders.length}',
-              ),
-            ),
-            const SizedBox(height: 10),
           ],
-        ),
-      ),
+        );
+      },
     );
   }
-}
-
-// ============================================================
-// HELPERS
-// ============================================================
-
-Widget _priority(String priority) {
-  Color color;
-
-  if (priority == 'Tinggi') {
-    color = red;
-  } else if (priority == 'Sedang') {
-    color = orange;
-  } else {
-    color = green;
-  }
-
-  return Container(
-    padding: const EdgeInsets.symmetric(
-      horizontal: 9,
-      vertical: 5,
-    ),
-    decoration: BoxDecoration(
-      color: color.withOpacity(.11),
-      borderRadius: BorderRadius.circular(10),
-    ),
-    child: Text(
-      priority,
-      style: TextStyle(
-        fontSize: 10,
-        color: color,
-        fontWeight: FontWeight.w800,
-      ),
-    ),
-  );
-}
-
-bool _sameDay(
-  DateTime a,
-  DateTime b,
-) {
-  return a.year == b.year &&
-      a.month == b.month &&
-      a.day == b.day;
-}
-
-int _minutes(TimeOfDay time) {
-  return time.hour * 60 + time.minute;
-}
-
-String _greeting() {
-  final hour = DateTime.now().hour;
-
-  if (hour < 11) {
-    return 'pagi';
-  }
-
-  if (hour < 15) {
-    return 'siang';
-  }
-
-  if (hour < 18) {
-    return 'sore';
-  }
-
-  return 'malam';
 }
