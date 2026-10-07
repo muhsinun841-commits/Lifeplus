@@ -11,27 +11,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Ambil kode
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.29.3'
-          channel: 'stable'
+          channel: stable
           cache: true
 
-      - name: Cek Flutter
-        run: flutter --version
+      - name: Buat struktur Flutter Android
+        run: |
+          mkdir /tmp/life_template
+          cd /tmp
+          flutter create -t app life_template
 
-      - name: Install dependencies
-        run: flutter pub get
+      - name: Salin kode LIFE+
+        run: |
+          cp -r lib /tmp/life_template/
+          cp pubspec.yaml /tmp/life_template/
 
-      - name: Build APK
-        run: flutter build apk --release
+      - name: Build project
+        working-directory: /tmp/life_template
+        run: |
+          flutter pub get
+          flutter build apk --release
 
       - name: Simpan APK
         uses: actions/upload-artifact@v4
         with:
           name: LIFE-plus-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: /tmp/life_template/build/app/outputs/flutter-apk/app-release.apk
