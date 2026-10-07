@@ -814,7 +814,7 @@ class HomePage extends StatelessWidget {
               width: 43,
               height: 43,
               decoration: BoxDecoration(
-                color: color.withOpacity(.12),
+                color: color.withValues(alpha: .12),
                 borderRadius: BorderRadius.circular(13),
               ),
               child: Icon(
@@ -863,7 +863,7 @@ class HomePage extends StatelessWidget {
               width: 70,
               height: 70,
               decoration: BoxDecoration(
-                color: lifeGreen.withOpacity(.10),
+                color:lifeGreen.withValues(alpha: .10),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -1399,7 +1399,7 @@ class _AddTaskPageState extends State<AddTaskPage> {
           width: 43,
           height: 43,
           decoration: BoxDecoration(
-            color: lifeYellow.withOpacity(.20),
+            color: lifeYellow.withValues(alpha: .20),
             borderRadius: BorderRadius.circular(13),
           ),
           child: Icon(
@@ -1563,7 +1563,7 @@ Widget _priorityChip(String priority) {
       vertical: 6,
     ),
     decoration: BoxDecoration(
-      color: color.withOpacity(.12),
+      color: color.withValues(alpha: .12),
       borderRadius: BorderRadius.circular(10),
     ),
     child: Text(
@@ -2701,7 +2701,7 @@ class _StatsPageState
               height: height,
               decoration: BoxDecoration(
                 color:
-                    lifeGreen.withOpacity(.80),
+                  lifeGreen.withValues(alpha: .80),
                 borderRadius:
                     BorderRadius.circular(8),
               ),
@@ -2967,7 +2967,7 @@ class SettingsPage extends StatelessWidget {
         width: 42,
         height: 42,
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(.05),
+          color: Colors.Colors.black.withValues(alpha: .05),
           borderRadius: BorderRadius.circular(13),
         ),
         child: Icon(icon),
