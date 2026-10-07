@@ -2967,7 +2967,7 @@ class SettingsPage extends StatelessWidget {
         width: 42,
         height: 42,
         decoration: BoxDecoration(
-          color: Colors.Colors.black.withValues(alpha: .05),
+          color:Colors.black.withValues(alpha: .05),
           borderRadius: BorderRadius.circular(13),
         ),
         child: Icon(icon),
