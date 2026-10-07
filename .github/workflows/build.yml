@@ -11,9 +11,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ==========================================
+      # 1. CHECKOUT
+      # ==========================================
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ==========================================
+      # 2. SETUP FLUTTER
+      # ==========================================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -21,73 +27,58 @@ jobs:
           channel: stable
           cache: true
 
+      # ==========================================
+      # 3. BUAT PROJECT FLUTTER ANDROID
+      # ==========================================
       - name: Buat project Android Flutter
         run: |
           cd /tmp
           flutter create -t app life_template
 
+      # ==========================================
+      # 4. SALIN KODE LIFE+
+      # ==========================================
       - name: Salin kode LIFE+
         run: |
           rm -rf /tmp/life_template/lib
           cp -r lib /tmp/life_template/lib
           cp pubspec.yaml /tmp/life_template/pubspec.yaml
 
+      # ==========================================
+      # 5. ATUR NDK ANDROID
+      # ==========================================
       - name: Atur NDK Android
         run: |
-          sed -i '/android {/a\    ndkVersion = "27.0.12077973"' /tmp/life_template/android/app/build.gradle.kts
+          sed -i '/android {/a\    ndkVersion = "27.0.12077973"' \
+            /tmp/life_template/android/app/build.gradle.kts
 
-      - name: Perbaiki kode LIFE+
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path("/tmp/life_template/lib/main.dart")
-          s = p.read_text()
-
-          s = s.replace(
-              "const SegmentedButton<int>(segments: [ButtonSegment(value: 0, label: Text('Minggu')), ButtonSegment(value: 1, label: Text('Bulan')), ButtonSegment(value: 2, label: Text('Tahun'))], selected: {0}, onSelectionChanged: null)",
-              "SegmentedButton<int>(segments: const [ButtonSegment(value: 0, label: Text('Minggu')), ButtonSegment(value: 1, label: Text('Bulan')), ButtonSegment(value: 2, label: Text('Tahun'))], selected: const {0}, onSelectionChanged: (_) {})"
-          )
-
-          old = """Widget _empty(String text, VoidCallback onAdd) => Card(elevation: 0, child: Padding(padding: const EdgeInsets.all(24), child: Column(children: [const Icon(Icons.check_circle_outline, size: 46, color: green), const SizedBox(height: 8), Text(text), const SizedBox(height: 10), OutlinedButton.icon(onPressed: onAdd, icon: const Icon(Icons.add), label: const Text('Tambah sekarang'))]));"""
-
-          new = """Widget _empty(String text, VoidCallback onAdd) {
-            return Card(
-              elevation: 0,
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  children: [
-                    const Icon(Icons.check_circle_outline, size: 46, color: green),
-                    const SizedBox(height: 8),
-                    Text(text),
-                    const SizedBox(height: 10),
-                    OutlinedButton.icon(
-                      onPressed: onAdd,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Tambah sekarang'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }"""
-
-          if old not in s:
-              raise SystemExit("Kode _empty tidak ditemukan")
-
-          s = s.replace(old, new)
-          p.write_text(s)
-          PY
-
+      # ==========================================
+      # 6. INSTALL DEPENDENCIES
+      # ==========================================
       - name: Install dependencies
         working-directory: /tmp/life_template
-        run: flutter pub get
+        run: |
+          flutter pub get
 
+      # ==========================================
+      # 7. CEK KODE FLUTTER
+      # ==========================================
+      - name: Analisis kode LIFE+
+        working-directory: /tmp/life_template
+        run: |
+          flutter analyze
+
+      # ==========================================
+      # 8. BUILD APK
+      # ==========================================
       - name: Build APK
         working-directory: /tmp/life_template
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release
 
+      # ==========================================
+      # 9. SIMPAN APK
+      # ==========================================
       - name: Simpan APK
         uses: actions/upload-artifact@v4
         with:
